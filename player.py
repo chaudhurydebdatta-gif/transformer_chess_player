@@ -32,7 +32,7 @@ class TransformerPlayer(Player):
 
 
    def get_move(self, fen):
-
+       
     import chess
     import random
 
@@ -88,3 +88,4 @@ class TransformerPlayer(Player):
         best_move = random.choice(legal_moves)
 
     return best_move.uci()
+
