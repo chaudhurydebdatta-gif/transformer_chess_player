@@ -23,6 +23,8 @@ class TransformerPlayer:
         self.history = {}
         self.killer_moves = [[None, None] for _ in range(64)]
 
+        self.pv_move = None
+
         self.opening_book = {
             "start": ["e2e4", "d2d4", "c2c4", "g1f3"]
         }
@@ -56,7 +58,7 @@ class TransformerPlayer:
         if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
             score -= 30
 
-        # passed pawn / pawn advancement
+        # pawn advancement bonus
         for sq in board.pieces(chess.PAWN, chess.WHITE):
             score += chess.square_rank(sq) * 5
 
@@ -86,6 +88,9 @@ class TransformerPlayer:
         for move in moves:
 
             score = 0
+
+            if move == self.pv_move:
+                score += 20000
 
             if board.is_capture(move):
 
@@ -150,7 +155,7 @@ class TransformerPlayer:
         return alpha
 
     # -------------------------
-    # Alpha-beta
+    # Alpha-beta search
     # -------------------------
 
     def alphabeta(self, board, depth, alpha, beta, ply):
@@ -170,9 +175,7 @@ class TransformerPlayer:
         if depth >= 3 and not board.is_check():
 
             board.push(chess.Move.null())
-
             score = -self.alphabeta(board, depth - 3, -beta, -beta + 1, ply + 1)
-
             board.pop()
 
             if score >= beta:
@@ -190,7 +193,6 @@ class TransformerPlayer:
             board.push(move)
 
             reduction = 0
-
             if index > 3 and depth > 2 and not board.is_capture(move):
                 reduction = 1
 
@@ -239,6 +241,7 @@ class TransformerPlayer:
             if score > best_score:
                 best_score = score
                 best_move = move
+                self.pv_move = move
 
         return best_score, best_move
 
@@ -254,7 +257,6 @@ class TransformerPlayer:
             return random.choice(self.opening_book["start"])
 
         start = time.time()
-
         best_move = None
 
         for depth in range(1, self.max_depth + 1):
