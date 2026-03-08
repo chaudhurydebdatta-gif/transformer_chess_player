@@ -103,7 +103,7 @@ class TransformerPlayer:
 
             ordered.append((score, move))
 
-        ordered.sort(reverse=True)
+        ordered.sort(key=lambda x: x[0], reverse=True)
 
         return [m for s, m in ordered]
 
