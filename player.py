@@ -7,39 +7,49 @@ class TransformerPlayer:
     def __init__(self):
 
         self.values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
+            chess.PAWN: 100,
+            chess.KNIGHT: 320,
+            chess.BISHOP: 330,
+            chess.ROOK: 500,
+            chess.QUEEN: 900,
             chess.KING: 0
         }
 
+        self.center = [chess.D4, chess.E4, chess.D5, chess.E5]
+
+        self.tt = {}
+
     # -------------------------
-    # Board evaluation
+    # Evaluation
     # -------------------------
     def evaluate_board(self, board):
 
         score = 0
 
-        # Material
-        for piece_type in self.values:
-            score += len(board.pieces(piece_type, chess.WHITE)) * self.values[piece_type]
-            score -= len(board.pieces(piece_type, chess.BLACK)) * self.values[piece_type]
+        for piece in self.values:
+            score += len(board.pieces(piece, chess.WHITE)) * self.values[piece]
+            score -= len(board.pieces(piece, chess.BLACK)) * self.values[piece]
 
-        # Mobility
+        for square in self.center:
+            piece = board.piece_at(square)
+            if piece:
+                if piece.color == chess.WHITE:
+                    score += 20
+                else:
+                    score -= 20
+
         mobility = len(list(board.legal_moves))
-        if board.turn == chess.WHITE:
-            score += mobility * 0.05
-        else:
-            score -= mobility * 0.05
 
-        # Check bonus
+        if board.turn == chess.WHITE:
+            score += mobility * 2
+        else:
+            score -= mobility * 2
+
         if board.is_check():
             if board.turn == chess.BLACK:
-                score += 0.5
+                score += 30
             else:
-                score -= 0.5
+                score -= 30
 
         return score
 
@@ -48,7 +58,7 @@ class TransformerPlayer:
     # -------------------------
     def order_moves(self, board, moves):
 
-        ordered = []
+        scored = []
 
         for move in moves:
 
@@ -57,32 +67,81 @@ class TransformerPlayer:
             if board.is_capture(move):
                 captured = board.piece_at(move.to_square)
                 if captured:
-                    score += self.values.get(captured.piece_type, 0) + 5
+                    score += 10 * self.values.get(captured.piece_type, 0)
+
+            if move.to_square in self.center:
+                score += 50
 
             board.push(move)
+
             if board.is_check():
-                score += 3
+                score += 200
+
             board.pop()
 
-            ordered.append((score, move))
+            scored.append((score, move))
 
-        ordered.sort(reverse=True, key=lambda x: x[0])
+        scored.sort(reverse=True, key=lambda x: x[0])
 
-        return [m for _, m in ordered]
+        return [m for _, m in scored]
 
     # -------------------------
-    # Alpha-beta search
+    # Quiescence
+    # -------------------------
+    def quiescence(self, board, alpha, beta):
+
+        stand_pat = self.evaluate_board(board)
+
+        if stand_pat >= beta:
+            return beta
+
+        if alpha < stand_pat:
+            alpha = stand_pat
+
+        for move in board.legal_moves:
+
+            if not board.is_capture(move):
+                continue
+
+            board.push(move)
+
+            score = -self.quiescence(board, -beta, -alpha)
+
+            board.pop()
+
+            if score >= beta:
+                return beta
+
+            if score > alpha:
+                alpha = score
+
+        return alpha
+
+    # -------------------------
+    # Alpha-beta
     # -------------------------
     def alphabeta(self, board, depth, alpha, beta, maximizing):
 
-        if depth == 0 or board.is_game_over():
-            return self.evaluate_board(board)
+        key = (board.fen(), depth)
 
-        moves = self.order_moves(board, list(board.legal_moves))[:10]
+        if key in self.tt:
+            return self.tt[key]
+
+        if depth == 0:
+            value = self.quiescence(board, alpha, beta)
+            self.tt[key] = value
+            return value
+
+        if board.is_game_over():
+            value = self.evaluate_board(board)
+            self.tt[key] = value
+            return value
+
+        moves = self.order_moves(board, list(board.legal_moves))[:12]
 
         if maximizing:
 
-            value = -9999
+            value = -999999
 
             for move in moves:
 
@@ -100,11 +159,9 @@ class TransformerPlayer:
                 if alpha >= beta:
                     break
 
-            return value
-
         else:
 
-            value = 9999
+            value = 999999
 
             for move in moves:
 
@@ -122,62 +179,63 @@ class TransformerPlayer:
                 if beta <= alpha:
                     break
 
-            return value
+        self.tt[key] = value
+
+        return value
 
     # -------------------------
-    # Main move selection
+    # Move function
     # -------------------------
     def get_move(self, fen):
 
         board = chess.Board(fen)
 
-        legal_moves = self.order_moves(board, list(board.legal_moves))
+        moves = list(board.legal_moves)
 
-        if not legal_moves:
+        if not moves:
             return None
 
-        best_move = None
+        moves = self.order_moves(board, moves)
 
-        if board.turn == chess.WHITE:
-            best_score = -9999
-        else:
-            best_score = 9999
+        best_move = random.choice(moves)
 
-        center = [chess.D4, chess.E4, chess.D5, chess.E5]
+        max_depth = 3
 
-        for move in legal_moves:
-
-            board.push(move)
-
-            if board.is_checkmate():
-                board.pop()
-                return move.uci()
-
-            score = self.alphabeta(board, 2, -9999, 9999, board.turn == chess.WHITE)
-
-            if board.is_capture(move):
-                captured = board.piece_at(move.to_square)
-                if captured:
-                    score += self.values.get(captured.piece_type, 0) * 0.5
-
-            if move.to_square in center:
-                score += 0.3
-
-            board.pop()
+        for depth in range(1, max_depth + 1):
 
             if board.turn == chess.WHITE:
-
-                if score > best_score:
-                    best_score = score
-                    best_move = move
-
+                best_score = -999999
             else:
+                best_score = 999999
 
-                if score < best_score:
-                    best_score = score
-                    best_move = move
+            for move in moves:
 
-        if best_move is None:
-            best_move = random.choice(legal_moves)
+                board.push(move)
+
+                if board.is_checkmate():
+                    board.pop()
+                    return move.uci()
+
+                score = self.alphabeta(
+                    board,
+                    depth,
+                    -999999,
+                    999999,
+                    board.turn == chess.WHITE
+                )
+
+                board.pop()
+
+                if board.turn == chess.WHITE:
+
+                    if score > best_score:
+                        best_score = score
+                        best_move = move
+
+                else:
+
+                    if score < best_score:
+                        best_score = score
+                        best_move = move
 
         return best_move.uci()
