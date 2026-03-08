@@ -17,7 +17,54 @@ class TransformerPlayer:
 
         self.center = [chess.D4, chess.E4, chess.D5, chess.E5]
 
+        # Transposition table
         self.tt = {}
+
+        # Opening book
+        self.opening_book = {
+            "start": ["e2e4", "d2d4", "c2c4", "g1f3"],
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR": ["c7c5", "e7e5", "e7e6"],
+            "rnbqkbnr/pppppppp/8/8/3PP3/8/PPP2PPP/RNBQKBNR": ["d7d5"],
+            "rnbqkbnr/pppppppp/8/8/2PP4/8/PP2PPPP/RNBQKBNR": ["e7e5"]
+        }
+
+        # Piece-square tables
+        self.pawn_table = [
+            0,0,0,0,0,0,0,0,
+            5,10,10,-20,-20,10,10,5,
+            5,-5,-10,0,0,-10,-5,5,
+            0,0,0,20,20,0,0,0,
+            5,5,10,25,25,10,5,5,
+            10,10,20,30,30,20,10,10,
+            50,50,50,50,50,50,50,50,
+            0,0,0,0,0,0,0,0
+        ]
+
+        self.knight_table = [
+            -50,-40,-30,-30,-30,-30,-40,-50,
+            -40,-20,0,5,5,0,-20,-40,
+            -30,5,10,15,15,10,5,-30,
+            -30,0,15,20,20,15,0,-30,
+            -30,5,15,20,20,15,5,-30,
+            -30,0,10,15,15,10,0,-30,
+            -40,-20,0,0,0,0,-20,-40,
+            -50,-40,-30,-30,-30,-30,-40,-50
+        }
+
+    # -------------------------
+    # Opening book
+    # -------------------------
+    def get_book_move(self, board):
+
+        fen_key = board.board_fen()
+
+        if board.fullmove_number == 1:
+            return random.choice(self.opening_book["start"])
+
+        if fen_key in self.opening_book:
+            return random.choice(self.opening_book[fen_key])
+
+        return None
 
     # -------------------------
     # Evaluation
@@ -26,18 +73,45 @@ class TransformerPlayer:
 
         score = 0
 
+        # Material
         for piece in self.values:
             score += len(board.pieces(piece, chess.WHITE)) * self.values[piece]
             score -= len(board.pieces(piece, chess.BLACK)) * self.values[piece]
 
-        for square in self.center:
+        # Piece-square tables
+        for square in chess.SQUARES:
+
             piece = board.piece_at(square)
+
+            if not piece:
+                continue
+
+            if piece.piece_type == chess.PAWN:
+
+                if piece.color == chess.WHITE:
+                    score += self.pawn_table[square]
+                else:
+                    score -= self.pawn_table[chess.square_mirror(square)]
+
+            elif piece.piece_type == chess.KNIGHT:
+
+                if piece.color == chess.WHITE:
+                    score += self.knight_table[square]
+                else:
+                    score -= self.knight_table[chess.square_mirror(square)]
+
+        # Center control
+        for square in self.center:
+
+            piece = board.piece_at(square)
+
             if piece:
                 if piece.color == chess.WHITE:
                     score += 20
                 else:
                     score -= 20
 
+        # Mobility
         mobility = len(list(board.legal_moves))
 
         if board.turn == chess.WHITE:
@@ -45,6 +119,7 @@ class TransformerPlayer:
         else:
             score -= mobility * 2
 
+        # Check bonus
         if board.is_check():
             if board.turn == chess.BLACK:
                 score += 30
@@ -65,7 +140,9 @@ class TransformerPlayer:
             score = 0
 
             if board.is_capture(move):
+
                 captured = board.piece_at(move.to_square)
+
                 if captured:
                     score += 10 * self.values.get(captured.piece_type, 0)
 
@@ -86,7 +163,7 @@ class TransformerPlayer:
         return [m for _, m in scored]
 
     # -------------------------
-    # Quiescence
+    # Quiescence search
     # -------------------------
     def quiescence(self, board, alpha, beta):
 
@@ -118,7 +195,7 @@ class TransformerPlayer:
         return alpha
 
     # -------------------------
-    # Alpha-beta
+    # Alpha-beta search
     # -------------------------
     def alphabeta(self, board, depth, alpha, beta, maximizing):
 
@@ -184,11 +261,16 @@ class TransformerPlayer:
         return value
 
     # -------------------------
-    # Move function
+    # Main move function
     # -------------------------
     def get_move(self, fen):
 
         board = chess.Board(fen)
+
+        # Opening book
+        book_move = self.get_book_move(board)
+        if book_move:
+            return book_move
 
         moves = list(board.legal_moves)
 
