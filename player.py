@@ -6,7 +6,6 @@ class TransformerPlayer:
 
     def __init__(self):
 
-        # Piece values
         self.values = {
             chess.PAWN: 1,
             chess.KNIGHT: 3,
@@ -20,19 +19,19 @@ class TransformerPlayer:
 
         score = 0
 
-        # ---------- Material ----------
+        # ----- Material -----
         for piece_type in self.values:
             score += len(board.pieces(piece_type, chess.WHITE)) * self.values[piece_type]
             score -= len(board.pieces(piece_type, chess.BLACK)) * self.values[piece_type]
 
-        # ---------- Mobility ----------
+        # ----- Mobility -----
         mobility = len(list(board.legal_moves))
         if board.turn == chess.WHITE:
             score += mobility * 0.05
         else:
             score -= mobility * 0.05
 
-        # ---------- Check bonus ----------
+        # ----- Check bonus -----
         if board.is_check():
             if board.turn == chess.BLACK:
                 score += 0.5
@@ -59,26 +58,46 @@ class TransformerPlayer:
 
             board.push(move)
 
-            # ---------- Immediate checkmate ----------
+            # ----- Instant checkmate -----
             if board.is_checkmate():
                 board.pop()
                 return move.uci()
 
-            score = self.evaluate_board(board)
+            # ----- Opponent responses (limit to keep it fast) -----
+            opponent_moves = list(board.legal_moves)[:10]
 
-            # ---------- Capture bonus ----------
+            if not opponent_moves:
+                score = self.evaluate_board(board)
+
+            else:
+
+                scores = []
+
+                for opp_move in opponent_moves:
+
+                    board.push(opp_move)
+
+                    score = self.evaluate_board(board)
+
+                    scores.append(score)
+
+                    board.pop()
+
+                # Opponent chooses best reply
+                if board.turn == chess.WHITE:
+                    score = min(scores)
+                else:
+                    score = max(scores)
+
+            # ----- Capture bonus -----
             if board.is_capture(move):
                 captured = board.piece_at(move.to_square)
                 if captured:
                     score += self.values.get(captured.piece_type, 0) * 0.5
 
-            # ---------- Center bonus ----------
+            # ----- Center bonus -----
             if move.to_square in center:
                 score += 0.3
-
-            # ---------- Avoid stalemate ----------
-            if board.is_stalemate():
-                score -= 5
 
             board.pop()
 
