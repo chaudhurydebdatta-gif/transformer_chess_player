@@ -1,10 +1,13 @@
 import chess
 import random
-
+import time
 
 class TransformerPlayer:
 
     def __init__(self):
+
+        self.max_depth = 4
+        self.time_limit = 1.0
 
         self.values = {
             chess.PAWN: 100,
@@ -12,162 +15,101 @@ class TransformerPlayer:
             chess.BISHOP: 330,
             chess.ROOK: 500,
             chess.QUEEN: 900,
-            chess.KING: 0
+            chess.KING: 20000
         }
 
-        self.center = [chess.D4, chess.E4, chess.D5, chess.E5]
-
-        # Transposition table
         self.tt = {}
+        self.history = {}
+        self.killer_moves = [[None, None] for _ in range(64)]
 
-        # Opening book
         self.opening_book = {
-            "start": ["e2e4", "d2d4", "c2c4", "g1f3"],
-            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR": ["c7c5", "e7e5", "e7e6"],
-            "rnbqkbnr/pppppppp/8/8/3PP3/8/PPP2PPP/RNBQKBNR": ["d7d5"],
-            "rnbqkbnr/pppppppp/8/8/2PP4/8/PP2PPPP/RNBQKBNR": ["e7e5"]
+            "start": ["e2e4", "d2d4", "c2c4", "g1f3"]
         }
 
-        # Piece-square tables
-        self.pawn_table = [
-            0,0,0,0,0,0,0,0,
-            5,10,10,-20,-20,10,10,5,
-            5,-5,-10,0,0,-10,-5,5,
-            0,0,0,20,20,0,0,0,
-            5,5,10,25,25,10,5,5,
-            10,10,20,30,30,20,10,10,
-            50,50,50,50,50,50,50,50,
-            0,0,0,0,0,0,0,0
-        ]
-
-        self.knight_table = [
-            -50,-40,-30,-30,-30,-30,-40,-50,
-            -40,-20,0,5,5,0,-20,-40,
-            -30,5,10,15,15,10,5,-30,
-            -30,0,15,20,20,15,0,-30,
-            -30,5,15,20,20,15,5,-30,
-            -30,0,10,15,15,10,0,-30,
-            -40,-20,0,0,0,0,-20,-40,
-            -50,-40,-30,-30,-30,-30,-40,-50
+        self.pst = {
+            chess.PAWN: [
+                0,0,0,0,0,0,0,0,
+                50,50,50,50,50,50,50,50,
+                10,10,20,30,30,20,10,10,
+                5,5,10,25,25,10,5,5,
+                0,0,0,20,20,0,0,0,
+                5,-5,-10,0,0,-10,-5,5,
+                5,10,10,-20,-20,10,10,5,
+                0,0,0,0,0,0,0,0
+            ],
+            chess.KNIGHT: [
+                -50,-40,-30,-30,-30,-30,-40,-50,
+                -40,-20,0,0,0,0,-20,-40,
+                -30,0,10,15,15,10,0,-30,
+                -30,5,15,20,20,15,5,-30,
+                -30,0,15,20,20,15,0,-30,
+                -30,5,10,15,15,10,5,-30,
+                -40,-20,0,5,5,0,-20,-40,
+                -50,-40,-30,-30,-30,-30,-40,-50
+            ]
         }
 
-    # -------------------------
-    # Opening book
-    # -------------------------
-    def get_book_move(self, board):
+    def evaluate(self, board):
 
-        fen_key = board.board_fen()
+        if board.is_checkmate():
+            return -999999 if board.turn else 999999
 
-        if board.fullmove_number == 1:
-            return random.choice(self.opening_book["start"])
-
-        if fen_key in self.opening_book:
-            return random.choice(self.opening_book[fen_key])
-
-        return None
-
-    # -------------------------
-    # Evaluation
-    # -------------------------
-    def evaluate_board(self, board):
+        if board.is_stalemate() or board.is_insufficient_material():
+            return 0
 
         score = 0
 
-        # Material
-        for piece in self.values:
-            score += len(board.pieces(piece, chess.WHITE)) * self.values[piece]
-            score -= len(board.pieces(piece, chess.BLACK)) * self.values[piece]
+        for square, piece in board.piece_map().items():
 
-        # Piece-square tables
-        for square in chess.SQUARES:
+            value = self.values[piece.piece_type]
 
-            piece = board.piece_at(square)
-
-            if not piece:
-                continue
-
-            if piece.piece_type == chess.PAWN:
-
+            if piece.piece_type in self.pst:
+                table = self.pst[piece.piece_type]
                 if piece.color == chess.WHITE:
-                    score += self.pawn_table[square]
+                    value += table[square]
                 else:
-                    score -= self.pawn_table[chess.square_mirror(square)]
+                    value -= table[chess.square_mirror(square)]
 
-            elif piece.piece_type == chess.KNIGHT:
-
-                if piece.color == chess.WHITE:
-                    score += self.knight_table[square]
-                else:
-                    score -= self.knight_table[chess.square_mirror(square)]
-
-        # Center control
-        for square in self.center:
-
-            piece = board.piece_at(square)
-
-            if piece:
-                if piece.color == chess.WHITE:
-                    score += 20
-                else:
-                    score -= 20
-
-        # Mobility
-        mobility = len(list(board.legal_moves))
-
-        if board.turn == chess.WHITE:
-            score += mobility * 2
-        else:
-            score -= mobility * 2
-
-        # Check bonus
-        if board.is_check():
-            if board.turn == chess.BLACK:
-                score += 30
+            if piece.color == chess.WHITE:
+                score += value
             else:
-                score -= 30
+                score -= value
 
         return score
 
-    # -------------------------
-    # Move ordering
-    # -------------------------
-    def order_moves(self, board, moves):
+    def order_moves(self, board, moves, depth):
 
-        scored = []
+        ordered = []
 
         for move in moves:
 
             score = 0
 
             if board.is_capture(move):
-
                 captured = board.piece_at(move.to_square)
-
                 if captured:
-                    score += 10 * self.values.get(captured.piece_type, 0)
+                    score += 10 * self.values[captured.piece_type]
 
-            if move.to_square in self.center:
+            if board.gives_check(move):
                 score += 50
 
-            board.push(move)
+            if move == self.killer_moves[depth][0]:
+                score += 9000
 
-            if board.is_check():
-                score += 200
+            if move == self.killer_moves[depth][1]:
+                score += 8000
 
-            board.pop()
+            score += self.history.get(move, 0)
 
-            scored.append((score, move))
+            ordered.append((score, move))
 
-        scored.sort(reverse=True, key=lambda x: x[0])
+        ordered.sort(reverse=True)
 
-        return [m for _, m in scored]
+        return [m for s, m in ordered]
 
-    # -------------------------
-    # Quiescence search
-    # -------------------------
     def quiescence(self, board, alpha, beta):
 
-        stand_pat = self.evaluate_board(board)
+        stand_pat = self.evaluate(board)
 
         if stand_pat >= beta:
             return beta
@@ -194,130 +136,95 @@ class TransformerPlayer:
 
         return alpha
 
-    # -------------------------
-    # Alpha-beta search
-    # -------------------------
-    def alphabeta(self, board, depth, alpha, beta, maximizing):
+    def alphabeta(self, board, depth, alpha, beta, ply):
 
-        key = (board.fen(), depth)
+        if depth <= 0:
+            return self.quiescence(board, alpha, beta)
+
+        key = board.fen()
 
         if key in self.tt:
             return self.tt[key]
 
-        if depth == 0:
-            value = self.quiescence(board, alpha, beta)
-            self.tt[key] = value
-            return value
+        if board.is_check():
+            depth += 1
 
-        if board.is_game_over():
-            value = self.evaluate_board(board)
-            self.tt[key] = value
-            return value
+        best_score = -999999
 
-        moves = self.order_moves(board, list(board.legal_moves))[:12]
+        moves = self.order_moves(board, list(board.legal_moves), ply)
 
-        if maximizing:
+        if not moves:
+            return self.evaluate(board)
 
-            value = -999999
+        for move in moves:
 
-            for move in moves:
+            board.push(move)
 
-                board.push(move)
+            score = -self.alphabeta(board, depth - 1, -beta, -alpha, ply + 1)
 
-                value = max(
-                    value,
-                    self.alphabeta(board, depth - 1, alpha, beta, False)
-                )
+            board.pop()
 
-                board.pop()
+            if score >= beta:
 
-                alpha = max(alpha, value)
+                if self.killer_moves[ply][0] != move:
+                    self.killer_moves[ply][1] = self.killer_moves[ply][0]
+                    self.killer_moves[ply][0] = move
 
-                if alpha >= beta:
-                    break
+                return beta
 
-        else:
+            if score > best_score:
+                best_score = score
 
-            value = 999999
+            if score > alpha:
+                alpha = score
+                self.history[move] = self.history.get(move, 0) + depth * depth
 
-            for move in moves:
+        self.tt[key] = best_score
 
-                board.push(move)
+        return best_score
 
-                value = min(
-                    value,
-                    self.alphabeta(board, depth - 1, alpha, beta, True)
-                )
+    def search_root(self, board, depth):
 
-                board.pop()
+        best_move = None
+        best_score = -999999
 
-                beta = min(beta, value)
+        moves = self.order_moves(board, list(board.legal_moves), 0)
 
-                if beta <= alpha:
-                    break
+        for move in moves:
 
-        self.tt[key] = value
+            board.push(move)
 
-        return value
+            score = -self.alphabeta(board, depth - 1, -999999, 999999, 1)
 
-    # -------------------------
-    # Main move function
-    # -------------------------
+            board.pop()
+
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+        return best_score, best_move
+
     def get_move(self, fen):
 
         board = chess.Board(fen)
 
-        # Opening book
-        book_move = self.get_book_move(board)
-        if book_move:
-            return book_move
+        if board.fullmove_number <= 2 and board.board_fen() == chess.Board().board_fen():
+            return random.choice(self.opening_book["start"])
 
-        moves = list(board.legal_moves)
+        start = time.time()
+        best_move = None
 
-        if not moves:
-            return None
+        for depth in range(1, self.max_depth + 1):
 
-        moves = self.order_moves(board, moves)
+            if time.time() - start > self.time_limit:
+                break
 
-        best_move = random.choice(moves)
+            score, move = self.search_root(board, depth)
 
-        max_depth = 3
+            if move:
+                best_move = move
 
-        for depth in range(1, max_depth + 1):
-
-            if board.turn == chess.WHITE:
-                best_score = -999999
-            else:
-                best_score = 999999
-
-            for move in moves:
-
-                board.push(move)
-
-                if board.is_checkmate():
-                    board.pop()
-                    return move.uci()
-
-                score = self.alphabeta(
-                    board,
-                    depth,
-                    -999999,
-                    999999,
-                    board.turn == chess.WHITE
-                )
-
-                board.pop()
-
-                if board.turn == chess.WHITE:
-
-                    if score > best_score:
-                        best_score = score
-                        best_move = move
-
-                else:
-
-                    if score < best_score:
-                        best_score = score
-                        best_move = move
+        if best_move is None:
+            best_move = random.choice(list(board.legal_moves))
 
         return best_move.uci()
