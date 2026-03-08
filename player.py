@@ -31,51 +31,60 @@ class TransformerPlayer(Player):
         return score
 
 
-    def get_move(self, board: chess.Board):
+   def get_move(self, fen):
 
-        legal_moves = list(board.legal_moves)
+    import chess
+    import random
 
-        best_move = None
-        best_score = -9999 if board.turn == chess.WHITE else 9999
+    board = chess.Board(fen)
 
-        for move in legal_moves:
+    legal_moves = list(board.legal_moves)
 
-            board.push(move)
+    if not legal_moves:
+        return None
 
-            # ---------- Immediate checkmate ----------
-            if board.is_checkmate():
-                board.pop()
-                return move
+    best_move = None
+    best_score = -9999 if board.turn == chess.WHITE else 9999
 
-            score = self.evaluate_board(board)
+    center = [chess.D4, chess.E4, chess.D5, chess.E5]
 
-            # ---------- Penalize moves that lose material ----------
-            if board.is_capture(move):
-                captured = board.piece_at(move.to_square)
-                if captured:
-                    score += self.values.get(captured.piece_type, 0)
+    for move in legal_moves:
 
-            # ---------- Prefer center ----------
-            center = [chess.D4, chess.E4, chess.D5, chess.E5]
-            if move.to_square in center:
-                score += 0.3
+        board.push(move)
 
-            # ---------- Avoid stalemate ----------
-            if board.is_stalemate():
-                score -= 5
-
+        # ---------- Immediate checkmate ----------
+        if board.is_checkmate():
             board.pop()
+            return move.uci()
 
-            if board.turn == chess.WHITE:
-                if score > best_score:
-                    best_score = score
-                    best_move = move
-            else:
-                if score < best_score:
-                    best_score = score
-                    best_move = move
+        score = self.evaluate_board(board)
 
-        if best_move is None:
-            return random.choice(legal_moves)
+        # ---------- Penalize moves that lose material ----------
+        if board.is_capture(move):
+            captured = board.piece_at(move.to_square)
+            if captured:
+                score += self.values.get(captured.piece_type, 0)
 
-        return best_move
+        # ---------- Prefer center ----------
+        if move.to_square in center:
+            score += 0.3
+
+        # ---------- Avoid stalemate ----------
+        if board.is_stalemate():
+            score -= 5
+
+        board.pop()
+
+        if board.turn == chess.WHITE:
+            if score > best_score:
+                best_score = score
+                best_move = move
+        else:
+            if score < best_score:
+                best_score = score
+                best_move = move
+
+    if best_move is None:
+        best_move = random.choice(legal_moves)
+
+    return best_move.uci()
