@@ -2,6 +2,7 @@ import chess
 import random
 import time
 
+
 class TransformerPlayer:
 
     def __init__(self):
@@ -26,28 +27,9 @@ class TransformerPlayer:
             "start": ["e2e4", "d2d4", "c2c4", "g1f3"]
         }
 
-        self.pst = {
-            chess.PAWN: [
-                0,0,0,0,0,0,0,0,
-                50,50,50,50,50,50,50,50,
-                10,10,20,30,30,20,10,10,
-                5,5,10,25,25,10,5,5,
-                0,0,0,20,20,0,0,0,
-                5,-5,-10,0,0,-10,-5,5,
-                5,10,10,-20,-20,10,10,5,
-                0,0,0,0,0,0,0,0
-            ],
-            chess.KNIGHT: [
-                -50,-40,-30,-30,-30,-30,-40,-50,
-                -40,-20,0,0,0,0,-20,-40,
-                -30,0,10,15,15,10,0,-30,
-                -30,5,15,20,20,15,5,-30,
-                -30,0,15,20,20,15,0,-30,
-                -30,5,10,15,15,10,5,-30,
-                -40,-20,0,5,5,0,-20,-40,
-                -50,-40,-30,-30,-30,-30,-40,-50
-            ]
-        }
+    # -------------------------
+    # Evaluation
+    # -------------------------
 
     def evaluate(self, board):
 
@@ -63,34 +45,59 @@ class TransformerPlayer:
 
             value = self.values[piece.piece_type]
 
-            if piece.piece_type in self.pst:
-                table = self.pst[piece.piece_type]
-                if piece.color == chess.WHITE:
-                    value += table[square]
-                else:
-                    value -= table[chess.square_mirror(square)]
-
             if piece.color == chess.WHITE:
                 score += value
             else:
                 score -= value
 
+        # bishop pair bonus
+        if len(board.pieces(chess.BISHOP, chess.WHITE)) >= 2:
+            score += 30
+        if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
+            score -= 30
+
+        # passed pawn / pawn advancement
+        for sq in board.pieces(chess.PAWN, chess.WHITE):
+            score += chess.square_rank(sq) * 5
+
+        for sq in board.pieces(chess.PAWN, chess.BLACK):
+            score -= (7 - chess.square_rank(sq)) * 5
+
+        # king safety
+        wk = board.king(chess.WHITE)
+        bk = board.king(chess.BLACK)
+
+        if wk is not None:
+            score -= len(board.attackers(chess.BLACK, wk)) * 10
+
+        if bk is not None:
+            score += len(board.attackers(chess.WHITE, bk)) * 10
+
         return score
+
+    # -------------------------
+    # Move ordering
+    # -------------------------
 
     def order_moves(self, board, moves, depth):
 
-        ordered = []
+        scored = []
 
         for move in moves:
 
             score = 0
 
             if board.is_capture(move):
+
                 captured = board.piece_at(move.to_square)
                 attacker = board.piece_at(move.from_square)
-                if captured:
+
+                if captured and attacker:
                     score += 10 * self.values[captured.piece_type]
                     score -= self.values[attacker.piece_type]
+
+            if move.promotion:
+                score += 8000
 
             if board.gives_check(move):
                 score += 50
@@ -103,21 +110,25 @@ class TransformerPlayer:
 
             score += self.history.get(move, 0)
 
-            ordered.append((score, move))
+            scored.append((score, move))
 
-        ordered.sort(key=lambda x: x[0], reverse=True)
+        scored.sort(key=lambda x: x[0], reverse=True)
 
-        return [m for s, m in ordered]
+        return [m for s, m in scored]
+
+    # -------------------------
+    # Quiescence search
+    # -------------------------
 
     def quiescence(self, board, alpha, beta):
 
-        stand_pat = self.evaluate(board)
+        stand = self.evaluate(board)
 
-        if stand_pat >= beta:
+        if stand >= beta:
             return beta
 
-        if alpha < stand_pat:
-            alpha = stand_pat
+        if alpha < stand:
+            alpha = stand
 
         for move in board.legal_moves:
 
@@ -138,6 +149,10 @@ class TransformerPlayer:
 
         return alpha
 
+    # -------------------------
+    # Alpha-beta
+    # -------------------------
+
     def alphabeta(self, board, depth, alpha, beta, ply):
 
         if depth <= 0:
@@ -151,6 +166,18 @@ class TransformerPlayer:
         if board.is_check():
             depth += 1
 
+        # null move pruning
+        if depth >= 3 and not board.is_check():
+
+            board.push(chess.Move.null())
+
+            score = -self.alphabeta(board, depth - 3, -beta, -beta + 1, ply + 1)
+
+            board.pop()
+
+            if score >= beta:
+                return beta
+
         best_score = -999999
 
         moves = self.order_moves(board, list(board.legal_moves), ply)
@@ -158,11 +185,16 @@ class TransformerPlayer:
         if not moves:
             return self.evaluate(board)
 
-        for move in moves:
+        for index, move in enumerate(moves):
 
             board.push(move)
 
-            score = -self.alphabeta(board, depth - 1, -beta, -alpha, ply + 1)
+            reduction = 0
+
+            if index > 3 and depth > 2 and not board.is_capture(move):
+                reduction = 1
+
+            score = -self.alphabeta(board, depth - 1 - reduction, -beta, -alpha, ply + 1)
 
             board.pop()
 
@@ -185,6 +217,10 @@ class TransformerPlayer:
 
         return best_score
 
+    # -------------------------
+    # Root search
+    # -------------------------
+
     def search_root(self, board, depth):
 
         best_move = None
@@ -206,6 +242,10 @@ class TransformerPlayer:
 
         return best_score, best_move
 
+    # -------------------------
+    # Main interface
+    # -------------------------
+
     def get_move(self, fen):
 
         board = chess.Board(fen)
@@ -214,6 +254,7 @@ class TransformerPlayer:
             return random.choice(self.opening_book["start"])
 
         start = time.time()
+
         best_move = None
 
         for depth in range(1, self.max_depth + 1):
