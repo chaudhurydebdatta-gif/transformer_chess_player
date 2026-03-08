@@ -87,8 +87,10 @@ class TransformerPlayer:
 
             if board.is_capture(move):
                 captured = board.piece_at(move.to_square)
+                attacker = board.piece_at(move.from_square)
                 if captured:
                     score += 10 * self.values[captured.piece_type]
+                    score -= self.values[attacker.piece_type]
 
             if board.gives_check(move):
                 score += 50
