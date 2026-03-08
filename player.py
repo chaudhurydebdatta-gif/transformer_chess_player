@@ -1,9 +1,12 @@
 import chess
 import random
 
+
 class TransformerPlayer:
 
     def __init__(self):
+
+        # Piece values
         self.values = {
             chess.PAWN: 1,
             chess.KNIGHT: 3,
@@ -14,17 +17,34 @@ class TransformerPlayer:
         }
 
     def evaluate_board(self, board):
+
         score = 0
 
+        # ---------- Material ----------
         for piece_type in self.values:
             score += len(board.pieces(piece_type, chess.WHITE)) * self.values[piece_type]
             score -= len(board.pieces(piece_type, chess.BLACK)) * self.values[piece_type]
+
+        # ---------- Mobility ----------
+        mobility = len(list(board.legal_moves))
+        if board.turn == chess.WHITE:
+            score += mobility * 0.05
+        else:
+            score -= mobility * 0.05
+
+        # ---------- Check bonus ----------
+        if board.is_check():
+            if board.turn == chess.BLACK:
+                score += 0.5
+            else:
+                score -= 0.5
 
         return score
 
     def get_move(self, fen):
 
         board = chess.Board(fen)
+
         legal_moves = list(board.legal_moves)
 
         if not legal_moves:
@@ -39,15 +59,24 @@ class TransformerPlayer:
 
             board.push(move)
 
+            # ---------- Immediate checkmate ----------
             if board.is_checkmate():
                 board.pop()
                 return move.uci()
 
             score = self.evaluate_board(board)
 
+            # ---------- Capture bonus ----------
+            if board.is_capture(move):
+                captured = board.piece_at(move.to_square)
+                if captured:
+                    score += self.values.get(captured.piece_type, 0) * 0.5
+
+            # ---------- Center bonus ----------
             if move.to_square in center:
                 score += 0.3
 
+            # ---------- Avoid stalemate ----------
             if board.is_stalemate():
                 score -= 5
 
